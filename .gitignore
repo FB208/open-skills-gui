@@ -1,0 +1,15 @@
+node_modules/
+.npm-cache/
+.tmp/
+.storage/
+bin/
+resources/
+dist/
+release/
+coverage/
+extensions/backend.cjs
+extensions/backend.cjs.map
+installer/output/
+*.log
+.DS_Store
+Thumbs.db

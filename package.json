@@ -1,0 +1,48 @@
+{
+  "name": "open-skills-gui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "npm run build:ui && npm run build:backend && npm run build:neutralino",
+    "build:ui": "vite build",
+    "build:backend": "node scripts/build-backend.mjs",
+    "build:neutralino": "neu build --release --clean",
+    "typecheck": "tsc -p tsconfig.ui.json --noEmit && tsc -p tsconfig.backend.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:restart-manager": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-restart-manager-integration.ps1 -AllowProcessTermination",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate:powershell": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-powershell.ps1",
+    "validate:runtime-paths": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-runtime-path-safety.ps1",
+    "validate:software-update": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-software-update-safety.ps1",
+    "smoke:skills-cli": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/smoke-skills-cli.ps1",
+    "verify:version": "node scripts/verify-version.mjs",
+    "package:installer": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-installer.ps1"
+  },
+  "dependencies": {
+    "@neutralinojs/lib": "6.5.0",
+    "preact": "10.29.7",
+    "semver": "7.7.3"
+  },
+  "devDependencies": {
+    "@neutralinojs/neu": "11.7.1",
+    "@preact/preset-vite": "2.10.2",
+    "@types/node": "24.10.1",
+    "@types/semver": "7.7.1",
+    "esbuild": "0.25.12",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

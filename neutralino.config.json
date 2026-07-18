@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "io.github.fb208.openskillsgui",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "/resources/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "enableExtensions": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
+  "nativeAllowList": [
+    "app.broadcast",
+    "app.exit",
+    "app.restartProcess",
+    "extensions.dispatch",
+    "extensions.getStats",
+    "os.execCommand"
+  ],
+  "modes": {
+    "window": {
+      "title": "Open Skills GUI",
+      "width": 1120,
+      "height": 760,
+      "minWidth": 880,
+      "minHeight": 620,
+      "center": true,
+      "resizable": true,
+      "enableInspector": false,
+      "exitProcessOnClose": true
+    }
+  },
+  "extensions": [
+    {
+      "id": "io.github.fb208.openskillsgui.backend",
+      "commandWindows": "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"${NL_PATH}/extensions/backend-launcher.ps1\""
+    }
+  ],
+  "cli": {
+    "binaryName": "OpenSkillsGUI",
+    "binaryVersion": "6.7.0",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": ""
+  }
+}

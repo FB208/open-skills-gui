@@ -1,0 +1,125 @@
+name: Windows build and release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      DISABLE_TELEMETRY: '1'
+      DO_NOT_TRACK: '1'
+      NO_UPDATE_NOTIFIER: '1'
+      npm_config_update_notifier: 'false'
+      npm_config_fund: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Validate versions and Windows scripts
+        shell: powershell
+        run: |
+          npm run verify:version
+          npm run validate:powershell
+          npm run validate:runtime-paths
+          npm run validate:software-update
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run real Restart Manager integration test
+        shell: powershell
+        run: npm run test:restart-manager
+
+      - name: Run isolated real skills CLI smoke test
+        shell: powershell
+        run: npm run smoke:skills-cli
+
+      - name: Download pinned Neutralino binaries
+        run: npx neu update
+
+      - name: Build Neutralino release
+        run: npm run build
+
+      - name: Install Inno Setup 6.7.3
+        shell: powershell
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $setup
+          $actual = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ($actual -ne $expected) { throw "Inno Setup SHA-256 mismatch: $actual" }
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/REDIRECTIONGUARD') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installation failed: $($process.ExitCode)" }
+
+      - name: Build installer
+        shell: powershell
+        run: npm run package:installer
+
+      - name: Ensure WebView2 for smoke test
+        shell: powershell
+        run: |
+          $client = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $current = (Get-ItemProperty -Path "HKCU:\$client" -Name pv -ErrorAction SilentlyContinue).pv
+          $machine = (Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -Name pv -ErrorAction SilentlyContinue).pv
+          if ([string]::IsNullOrWhiteSpace($current) -and [string]::IsNullOrWhiteSpace($machine)) {
+            $bootstrapper = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrapper
+            $process = Start-Process -FilePath $bootstrapper -ArgumentList @('/silent', '/install') -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "WebView2 installation failed: $($process.ExitCode)" }
+          }
+
+      - name: Installer install/uninstall smoke test
+        shell: powershell
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/smoke-installer.ps1 -InstallerPath installer/output/OpenSkillsGUI-Setup-x64.exe
+
+      - name: Upload installer artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSkillsGUI-Windows-x64
+          path: installer/output/OpenSkillsGUI-Setup-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" "installer/output/OpenSkillsGUI-Setup-x64.exe" --verify-tag --generate-notes --title "$env:GITHUB_REF_NAME"
