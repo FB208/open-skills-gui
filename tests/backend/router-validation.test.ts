@@ -133,6 +133,22 @@ describe('后端路由请求校验', () => {
     );
   });
 
+  it('领域操作失败时发送失败进度，避免界面残留处理中状态', async () => {
+    const { router, skills, progress } = createRouter();
+    skills.searchRemote.mockRejectedValue(new Error('伪造搜索失败'));
+
+    const response = await router.handle({
+      requestId: 'failed-search',
+      method: 'skills.searchRemote',
+      payload: { query: 'test' },
+    });
+
+    expect(response).toMatchObject({ requestId: 'failed-search', ok: false });
+    expect(progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'failed-search', stage: 'failed' }),
+    );
+  });
+
   it('软件更新流式进度使用触发安装的真实 requestId', async () => {
     const { router, appUpdate, progress } = createRouter();
     appUpdate.install.mockImplementation(async (...args: unknown[]) => {

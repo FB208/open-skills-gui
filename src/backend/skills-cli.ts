@@ -113,6 +113,9 @@ export function createNpxCommand(
     throw new BackendException('RUNTIME_NOT_READY', '运行环境路径不安全或 npx 未绑定到 Node.js');
   }
   const homeDir = path.resolve(options.homeDir ?? layout.homeDir);
+  const safeExitModule = path
+    .join(layout.appRoot, 'extensions', 'skills-safe-exit.cjs')
+    .replaceAll('\\', '/');
   const systemDirectory = path.join(
     path.resolve(process.env.SystemRoot ?? 'C:\\Windows'),
     'System32',
@@ -144,6 +147,8 @@ export function createNpxCommand(
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'credential.helper',
       GIT_CONFIG_VALUE_0: '',
+      // skills@1.5.19 关闭遥测后退出过早，预加载模块会等待 Windows 网络句柄关闭。
+      NODE_OPTIONS: `--require=\"${safeExitModule}\"`,
     },
     signal: options.signal,
     timeoutMs: 5 * 60_000,

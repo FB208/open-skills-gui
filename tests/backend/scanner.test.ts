@@ -3,7 +3,7 @@ import os from 'node:os';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPathLayout, ensureDataDirectories } from '../../src/backend/paths.js';
-import { SkillScanner } from '../../src/backend/scanner.js';
+import { SkillScanner, stableSkillId } from '../../src/backend/scanner.js';
 import { StateRepository } from '../../src/backend/state.js';
 import type { SkillsClient } from '../../src/backend/skills-cli.js';
 
@@ -149,6 +149,92 @@ describe('本地 Skill 扫描', () => {
     expect(result.skills[0]).toMatchObject({ id, managed: true, source: { type: 'unknown' } });
   });
 
+  it('优先匹配受管记录，并隐藏接管改号遗留的未托管重复项', async () => {
+    const client = fakeClient(vi.fn(async () => [{ name: '重复-skill' }]));
+    const { layout, repository, scanner } = await scannerFixture(client);
+    const canonicalPath = path.join(layout.targetRoots.universal, '重复-skill');
+    await mkdir(canonicalPath, { recursive: true });
+    await writeFile(path.join(canonicalPath, 'SKILL.md'), '# 重复 Skill\n', 'utf8');
+    await writeFile(
+      path.join(layout.homeDir, '.agents', '.skill-lock.json'),
+      JSON.stringify({
+        version: 3,
+        skills: {
+          '重复-skill': {
+            source: 'owner/repo',
+            sourceType: 'github',
+            sourceUrl: 'https://github.com/owner/repo.git',
+            skillPath: 'skills/重复-skill/SKILL.md',
+          },
+        },
+      }),
+      'utf8',
+    );
+    const source = {
+      type: 'github' as const,
+      locator: 'owner/repo',
+      skillPath: 'skills/重复-skill',
+    };
+    const managedId = stableSkillId(source, '重复-skill');
+    const tombstoneId = '11111111-1111-4111-8111-111111111111';
+    const duplicateId = '22222222-2222-4222-8222-222222222222';
+    const now = '2026-07-18T00:00:00.000Z';
+    await repository.save({
+      schemaVersion: 1,
+      settings: { onboardingCompleted: true, legacyDecisionMade: true },
+      skills: {
+        [tombstoneId]: {
+          id: tombstoneId,
+          name: '重复-skill',
+          source,
+          state: 'uninstalled',
+          managed: false,
+          targets: ['universal'],
+          observedPaths: [],
+          updateStatus: 'unchecked',
+          note: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+        [duplicateId]: {
+          id: duplicateId,
+          name: '重复-skill',
+          source,
+          state: 'enabled',
+          managed: false,
+          targets: ['universal'],
+          canonicalPath,
+          observedPaths: [canonicalPath],
+          updateStatus: 'unchecked',
+          note: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+        [managedId]: {
+          id: managedId,
+          name: '重复-skill',
+          source,
+          state: 'enabled',
+          managed: true,
+          targets: ['universal'],
+          canonicalPath,
+          observedPaths: [canonicalPath],
+          updateStatus: 'latest',
+          note: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    });
+
+    const result = await scanner.scan();
+    const saved = await repository.load();
+
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0]).toMatchObject({ id: managedId, managed: true, state: 'enabled' });
+    expect(saved.skills[tombstoneId]).toBeUndefined();
+    expect(saved.skills[duplicateId]).toBeUndefined();
+  });
   it('CLI 清单读取失败时明确失败，不把来源识别退化为猜测', async () => {
     const failure = new Error('伪造 CLI 失败');
     const client = fakeClient(vi.fn(async () => Promise.reject(failure)));

@@ -9,6 +9,7 @@ release/
 coverage/
 extensions/backend.cjs
 extensions/backend.cjs.map
+extensions/skills-safe-exit.cjs
 installer/output/
 *.log
 .DS_Store

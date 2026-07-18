@@ -5,6 +5,7 @@ import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppState } from '../../src/shared/types.js';
 import { createPathLayout, ensureDataDirectories } from '../../src/backend/paths.js';
+import { stableSkillId } from '../../src/backend/scanner.js';
 import type { SkillScanner } from '../../src/backend/scanner.js';
 import type { SkillsClient } from '../../src/backend/skills-cli.js';
 import { SkillsService } from '../../src/backend/skills-service.js';
@@ -40,6 +41,12 @@ describe('旧 Skill 接管', () => {
     await symlink(dedicated, destination, 'junction');
 
     const id = randomUUID();
+    const source = {
+      type: 'github' as const,
+      locator: 'owner/repo',
+      skillPath: 'skills/示例-skill',
+    };
+    const managedId = stableSkillId(source, '示例-skill');
     const now = new Date().toISOString();
     const state: AppState = {
       schemaVersion: 1,
@@ -48,7 +55,7 @@ describe('旧 Skill 接管', () => {
         [id]: {
           id,
           name: '示例-skill',
-          source: { type: 'unknown', locator: '' },
+          source,
           state: 'enabled',
           managed: false,
           targets: ['claude-code'],
@@ -81,15 +88,18 @@ describe('旧 Skill 接管', () => {
     );
 
     const result = await service.adopt({ ids: [id] });
+    const saved = await repository.load();
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
-      id,
+      id: managedId,
       managed: true,
       state: 'enabled',
       note: '保留备注',
       targets: ['universal', 'claude-code'],
     });
+    expect(saved.skills[id]).toBeUndefined();
+    expect(Object.keys(saved.skills)).toEqual([managedId]);
     expect((await lstat(destination)).isSymbolicLink()).toBe(false);
     await expect(readFile(path.join(destination, 'SKILL.md'), 'utf8')).resolves.toBe(
       '# 示例 Skill\n',

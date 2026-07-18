@@ -364,7 +364,8 @@ export function App(): JSX.Element {
     let backendSession: Promise<void> | null = null;
     let automaticUpdateStarted = false;
     const removeProgress = backend.onProgress((event) => {
-      if (active) setProgress(event);
+      if (!active) return;
+      setProgress(['completed', 'failed'].includes(event.stage) ? null : event);
     });
 
     /** 仅启动一次静默的软件更新检查，不阻塞运行环境检测或扫描。 */
@@ -603,7 +604,7 @@ export function App(): JSX.Element {
       const normalized = result.map((item) =>
         item.source.type === 'unknown' ? { ...item, updateStatus: 'unavailable' as const } : item,
       );
-      applySkillResult(normalized);
+      setSkills(normalized);
       if (showSuccess) notify('Skill 已接管。');
       return true;
     } catch (caught) {
@@ -632,7 +633,7 @@ export function App(): JSX.Element {
     try {
       if (!known.length) {
         const retained = await backend.call('skills.adopt', { decline: true });
-        applySkillResult(retained);
+        setSkills(retained);
       }
       for (const skill of known) {
         const completed = await adoptSkill(skill, undefined, undefined, false);
@@ -660,7 +661,7 @@ export function App(): JSX.Element {
       backend.call('skills.adopt', { decline: true }),
     );
     if (!result) return;
-    applySkillResult(result);
+    setSkills(result);
     setLegacyPrompt(false);
   };
 

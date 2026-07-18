@@ -115,7 +115,6 @@ export class SkillsService {
         this.locks,
         before,
       );
-      const changed: SkillRecord[] = [];
       try {
         for (const original of selected) {
           const record = structuredClone(requireRecord(next, original.id));
@@ -131,14 +130,13 @@ export class SkillsService {
               ? record.id
               : stableSkillId(record.source, record.name);
           if (newId !== record.id) {
+            const oldId = record.id;
             const collision = next.skills[newId];
             if (collision && collision.state !== 'uninstalled')
               throw new BackendException('SKILL_ID_CONFLICT', '已存在相同来源的 Skill');
-            const tombstone = toTombstone(record);
-            next.skills[record.id] = tombstone;
-            changed.push(structuredClone(tombstone));
-            record.id = newId;
             record.note ||= collision?.note ?? '';
+            delete next.skills[oldId];
+            record.id = newId;
           }
           Object.assign(record, adopted, {
             managed: true,
@@ -146,11 +144,10 @@ export class SkillsService {
             updatedAt: timestamp(),
           });
           next.skills[record.id] = record;
-          changed.push(structuredClone(record));
         }
         next.settings.legacyDecisionMade = true;
         await transaction.commit(next);
-        return changed.length > 0 ? changed : visibleSkills(next);
+        return visibleSkills(next);
       } catch (error) {
         await transaction.rollback().catch(() => undefined);
         throw error;

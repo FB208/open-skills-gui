@@ -30,8 +30,9 @@ export class BackendRouter {
   /** 处理单个未知输入，并始终返回统一响应结构。 */
   async handle(input: unknown): Promise<BackendResponse> {
     let requestId = 'unknown';
+    let request: BackendRequest | undefined;
     try {
-      const request = validateRequest(input);
+      request = validateRequest(input);
       requestId = request.requestId;
       await this.progress(request, 'starting', '正在处理请求');
       const data = await this.dispatch(request);
@@ -39,6 +40,9 @@ export class BackendRouter {
       return { requestId, ok: true, data };
     } catch (error) {
       const normalized = toBackendError(error);
+      if (request) {
+        await this.progress(request, 'failed', '操作失败').catch(() => undefined);
+      }
       await this.logger
         .error(normalized.message, {
           requestId,

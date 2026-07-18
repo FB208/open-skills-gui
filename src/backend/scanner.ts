@@ -36,7 +36,8 @@ export class SkillScanner {
     const locks = await readOfficialLock(
       path.join(this.layout.homeDir, '.agents', '.skill-lock.json'),
     );
-    const cliNames = await this.readCliNames();
+    // 启动扫描不再等待 npx；没有 CLI 时直接采用官方锁文件中的名称。
+    const cliNames = this.cli ? await this.readCliNames() : new Set(locks.keys());
     const discovered = await discoverRoots(this.layout, locks, cliNames);
     return await this.repository.update((state) => {
       mergeDiscovered(state, discovered);
@@ -155,6 +156,7 @@ function mergeDiscovered(state: AppState, discovered: DiscoveredSkill[]): void {
       existing.localHash = item.localHash;
       existing.updatedAt = timestamp;
       matched.add(existing.id);
+      if (existing.managed) removeLegacyDuplicates(state, existing);
       continue;
     }
     const id = source.type === 'unknown' ? randomUUID() : stableSkillId(source, item.name);
@@ -189,6 +191,19 @@ function mergeDiscovered(state: AppState, discovered: DiscoveredSkill[]): void {
   }
 }
 
+/** 删除已接管 Skill 对应的旧未托管记录。 */
+function removeLegacyDuplicates(state: AppState, managed: SkillRecord): void {
+  for (const [id, record] of Object.entries(state.skills)) {
+    if (
+      id !== managed.id &&
+      !record.managed &&
+      record.name.toLowerCase() === managed.name.toLowerCase()
+    ) {
+      delete state.skills[id];
+    }
+  }
+}
+
 /** 按路径、稳定身份或旧名称匹配现有记录。 */
 function findExisting(
   state: AppState,
@@ -197,15 +212,27 @@ function findExisting(
   matched: Set<string>,
 ): SkillRecord | undefined {
   const paths = new Set([item.canonicalPath, ...item.observedPaths].map(normalizedPath));
-  return Object.values(state.skills).find((record) => {
-    if (matched.has(record.id) || record.state === 'disabled') return false;
+  const records = Object.values(state.skills).filter(
+    (record) => !matched.has(record.id) && record.state === 'enabled',
+  );
+  if (source.type !== 'unknown') {
+    const stableId = stableSkillId(source, item.name);
+    const stableRecord = records.find((record) => record.id === stableId);
+    if (stableRecord) return stableRecord;
+  }
+  const pathMatches = records.filter((record) => {
     const oldPaths = [record.canonicalPath, ...record.observedPaths]
       .filter((candidate): candidate is string => Boolean(candidate))
       .map(normalizedPath);
-    if (oldPaths.some((candidate) => paths.has(candidate))) return true;
-    if (source.type !== 'unknown' && record.id === stableSkillId(source, item.name)) return true;
-    return !record.managed && record.name.toLowerCase() === item.name.toLowerCase();
+    return oldPaths.some((candidate) => paths.has(candidate));
   });
+  return (
+    pathMatches.find((record) => record.managed) ??
+    pathMatches[0] ??
+    records.find(
+      (record) => !record.managed && record.name.toLowerCase() === item.name.toLowerCase(),
+    )
+  );
 }
 
 /** 根据规范化来源生成稳定身份。 */

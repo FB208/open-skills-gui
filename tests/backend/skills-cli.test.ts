@@ -164,6 +164,7 @@ describe('Skill 来源规范化', () => {
       HTTPS_PROXY: 'http://127.0.0.1:8080',
       GIT_CONFIG_KEY_0: 'credential.helper',
       GIT_CONFIG_VALUE_0: '',
+      NODE_OPTIONS: '--require="C:/程序/Open Skills GUI/extensions/skills-safe-exit.cjs"',
     });
     expect(command.env?.GITHUB_TOKEN).toBeUndefined();
     expect(command.env?.GIT_ASKPASS).toBeUndefined();
