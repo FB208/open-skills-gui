@@ -9,6 +9,7 @@ export interface PathLayout {
   dataRoot: string;
   dataDir: string;
   stateFile: string;
+  restartApplicationsFile: string;
   journalFile: string;
   disabledDir: string;
   logsDir: string;
@@ -32,6 +33,7 @@ export function createPathLayout(
     dataRoot,
     dataDir: path.join(dataRoot, 'data'),
     stateFile: path.join(dataRoot, 'data', 'state.json'),
+    restartApplicationsFile: path.join(dataRoot, 'data', 'restart-applications.json'),
     journalFile: path.join(dataRoot, 'data', 'operation-journal.json'),
     disabledDir: path.join(dataRoot, 'workspace', 'disabled'),
     logsDir: path.join(dataRoot, 'logs'),

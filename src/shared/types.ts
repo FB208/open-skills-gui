@@ -84,6 +84,26 @@ export interface AppUpdateInfo {
   digest?: string;
 }
 
+export interface RestartApplication {
+  id: string;
+  name: string;
+  executablePath: string;
+  createdAt: string;
+}
+
+export interface RestartApplicationResult {
+  application: RestartApplication;
+  restarted: boolean;
+  processId?: number;
+}
+
+export interface RestartApplicationsBatchResult {
+  configured: number;
+  restarted: RestartApplicationResult[];
+  skipped: RestartApplication[];
+  failed: Array<{ application: RestartApplication; message: string }>;
+}
+
 export type BackendMethod =
   | 'runtime.status'
   | 'runtime.install'
@@ -99,7 +119,12 @@ export type BackendMethod =
   | 'skills.checkUpdates'
   | 'skills.update'
   | 'app.checkUpdate'
-  | 'app.installUpdate';
+  | 'app.installUpdate'
+  | 'restartApplications.list'
+  | 'restartApplications.add'
+  | 'restartApplications.remove'
+  | 'restartApplications.restart'
+  | 'restartApplications.restartRunning';
 
 export interface BackendRequest<T = unknown> {
   requestId: string;

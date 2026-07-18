@@ -16,36 +16,18 @@
 ```powershell
 npm ci
 npx neu update
-```
-
-构建并启动完整应用：
-
-```powershell
-npm run build
 npx neu run
 ```
 
-修改代码后需要重新执行 `npm run build`。如果只调试前端界面，可使用热更新模式：
+## 构建并启动完整应用
+
 
 ```powershell
-npm run dev
-```
-
-提交前可执行检查：
-
-```powershell
-npm run typecheck
-npm test
-```
-
-## 打包
-
-```powershell
-npm ci
-npx neu update
 npm run build
-npm run package:installer
+
 ```
+
+
 
 安装程序生成在 `installer\output\OpenSkillsGUI-Setup-x64.exe`。
 

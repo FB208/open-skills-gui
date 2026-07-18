@@ -436,6 +436,7 @@ async function createFixture(withHelper = false): Promise<{ root: string; layout
     dataRoot,
     dataDir: path.join(dataRoot, 'data'),
     stateFile: path.join(dataRoot, 'data', 'state.json'),
+    restartApplicationsFile: path.join(dataRoot, 'data', 'restart-applications.json'),
     journalFile: path.join(dataRoot, 'data', 'operation-journal.json'),
     disabledDir: path.join(dataRoot, 'workspace', 'disabled'),
     logsDir: path.join(dataRoot, 'logs'),

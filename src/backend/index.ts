@@ -11,6 +11,7 @@ import { createPathLayout, ensureDataDirectories } from './paths.js';
 import { SpawnCommandRunner } from './process.js';
 import { BackendRouter } from './router.js';
 import { RuntimeService } from './runtime.js';
+import { RestartApplicationsService } from './restart-applications.js';
 import { SkillScanner } from './scanner.js';
 import { SkillsCli } from './skills-cli.js';
 import { SkillsService } from './skills-service.js';
@@ -135,7 +136,20 @@ async function main(): Promise<void> {
   const emitProgress = async (progress: OperationProgress): Promise<void> =>
     broadcast(socket, connection.nlToken, PROGRESS_EVENT, progress);
   const appUpdate = new AppUpdateService(layout);
-  const router = new BackendRouter(runtime, skills, appUpdate, writes, logger, emitProgress);
+  const restartApplications = new RestartApplicationsService(
+    layout.restartApplicationsFile,
+    runner,
+    writes,
+  );
+  const router = new BackendRouter(
+    runtime,
+    skills,
+    appUpdate,
+    writes,
+    logger,
+    emitProgress,
+    restartApplications,
+  );
 
   socket.onopen = () => {
     broadcast(socket, connection.nlToken, READY_EVENT, {

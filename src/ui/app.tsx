@@ -9,6 +9,7 @@ import type {
   BackendMethod,
   OperationProgress,
   RemoteSkillResult,
+  RestartApplication,
   RuntimeComponentStatus,
   RuntimeStatus,
   SkillRecord,
@@ -22,7 +23,7 @@ import { buildRuntimeBootstrapCommand, type RuntimeBootstrapAction } from './run
 import { fuzzyMatch, mergeSkills, normalizeText, summarizeUpdateResults } from './skill-utils';
 import { canUseSkillPages, classifyBackendTimeout, startSilentUpdateCheck } from './startup-policy';
 
-type Page = 'installed' | 'search' | 'settings';
+type Page = 'installed' | 'search' | 'restartApplications' | 'settings';
 type SkillMutationMethod = 'skills.enable' | 'skills.disable' | 'skills.remove';
 
 interface ConfirmState {
@@ -70,8 +71,8 @@ const TARGET_OPTIONS: Array<{ value: AgentTarget; label: string; hint: string }>
 
 const UPDATE_META: Record<UpdateStatus, { label: string; tone: string }> = {
   latest: { label: '已是最新', tone: 'success' },
-  available: { label: '有可用更新', tone: 'accent' },
-  'local-modified': { label: '本地已修改', tone: 'warning' },
+  available: { label: '可更新', tone: 'accent' },
+  'local-modified': { label: '本地修改', tone: 'warning' },
   conflict: { label: '更新冲突', tone: 'danger' },
   unavailable: { label: '无法更新', tone: 'neutral' },
   failed: { label: '检查失败', tone: 'danger' },
@@ -245,6 +246,7 @@ export function App(): JSX.Element {
   const [bootstrapOnly, setBootstrapOnly] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [restartApplications, setRestartApplications] = useState<RestartApplication[]>([]);
   const [installedQuery, setInstalledQuery] = useState('');
   const [remoteQuery, setRemoteQuery] = useState('');
   const [remoteResults, setRemoteResults] = useState<RemoteSkillResult[]>([]);
@@ -270,7 +272,10 @@ export function App(): JSX.Element {
   const searchSequence = useRef(0);
   const activeSearch = useRef<string | null>(null);
   const skillPagesEnabled = canUseSkillPages(backendConnected, runtime);
-  const displayedPage: Page = skillPagesEnabled || page === 'settings' ? page : 'settings';
+  const displayedPage: Page =
+    skillPagesEnabled || page === 'settings' || (page === 'restartApplications' && backendConnected)
+      ? page
+      : 'settings';
 
   const visibleSkills = useMemo(
     () =>
@@ -390,6 +395,7 @@ export function App(): JSX.Element {
         setBootstrapOnly(false);
         setError((current) => (current?.code === 'BACKEND_START_FAILED' ? null : current));
         startAutomaticUpdateCheck();
+        setRestartApplications(await backend.call('restartApplications.list'));
 
         const runtimeStatus = await backend.call('runtime.status');
         if (!active) return;
@@ -947,6 +953,65 @@ export function App(): JSX.Element {
     }
   };
 
+  /** 从系统文件选择器添加一个 EXE 应用。 */
+  const addRestartApplication = async (): Promise<void> => {
+    const selected = await os.showOpenDialog('选择要添加的应用程序', {
+      filters: [{ name: 'Windows 应用程序', extensions: ['exe'] }],
+      multiSelections: false,
+    });
+    const executablePath = selected[0];
+    if (!executablePath) return;
+    const result = await runBusy('restart-application-add', () =>
+      backend.call('restartApplications.add', { executablePath }),
+    );
+    if (!result) return;
+    setRestartApplications(await backend.call('restartApplications.list'));
+    notify(`已添加 ${result.name}。`);
+  };
+
+  /** 正常关闭并重新启动一个已配置应用。 */
+  const restartConfiguredApplication = async (application: RestartApplication): Promise<void> => {
+    const result = await runBusy(`restart-application-${application.id}`, () =>
+      backend.call('restartApplications.restart', { id: application.id }),
+    );
+    if (result?.restarted) notify(`${application.name} 已重新启动。`);
+  };
+
+  /** 重启所有已配置且当前正在运行的应用。 */
+  const restartRunningApplications = async (): Promise<void> => {
+    const result = await runBusy('restart-running-applications', () =>
+      backend.call('restartApplications.restartRunning'),
+    );
+    if (!result) return;
+    if (!result.configured) {
+      notify('尚未配置需要重启的应用。', 'info');
+      return;
+    }
+    if (result.restarted.length) {
+      notify(`已重启 ${result.restarted.length} 个正在运行的应用。`);
+    } else if (!result.failed.length) {
+      notify('已配置的应用当前都没有运行。', 'info');
+    }
+    if (result.failed.length) {
+      setError({
+        title: '部分应用未能重启',
+        message: `${result.failed.length} 个应用无法正常关闭或重新启动。`,
+        details: result.failed
+          .map((item) => `${item.application.name}：${item.message}`)
+          .join('\n'),
+      });
+    }
+  };
+  /** 从列表移除应用配置，不影响程序本身。 */
+  const removeRestartApplication = async (application: RestartApplication): Promise<void> => {
+    const result = await runBusy(`remove-restart-application-${application.id}`, () =>
+      backend.call('restartApplications.remove', { id: application.id }),
+    );
+    if (!result?.removed) return;
+    setRestartApplications((current) => current.filter((item) => item.id !== application.id));
+    notify(`已移除 ${application.name}。`);
+  };
+
   /** 渲染左侧主导航。 */
   const renderNavigation = (): JSX.Element => (
     <aside className="sidebar">
@@ -964,12 +1029,16 @@ export function App(): JSX.Element {
       <nav className="nav" aria-label="主要导航">
         {(
           [
-            ['installed', 'apps', '已安装'],
+            ['installed', 'apps', 'Skill 管理'],
             ['search', 'search', '搜索'],
+            ['restartApplications', 'refresh', '应用重启'],
             ['settings', 'settings', '设置'],
           ] as const
         ).map(([value, icon, label]) => {
-          const disabled = value !== 'settings' && !skillPagesEnabled;
+          const disabled =
+            value === 'restartApplications'
+              ? !backendConnected
+              : value !== 'settings' && !skillPagesEnabled;
           return (
             <button
               key={value}
@@ -998,42 +1067,51 @@ export function App(): JSX.Element {
 
   /** 渲染已安装 Skill 管理页。 */
   const renderInstalledPage = (): JSX.Element => {
+    const activeSkills = skills.filter((item) => item.state !== 'uninstalled');
+    const enabledCount = activeSkills.filter((item) => item.state === 'enabled').length;
+    const updateCount = activeSkills.filter((item) => item.updateStatus === 'available').length;
+    const unmanagedCount = activeSkills.filter((item) => !item.managed).length;
+    const visibleManaged = visibleSkills.filter((skill) => skill.managed);
+    const selectedUpdateCount = selectedManaged.filter(
+      (skill) => skill.updateStatus === 'available',
+    ).length;
     const allVisibleSelected =
-      visibleSkills.filter((skill) => skill.managed).length > 0 &&
-      visibleSkills.filter((skill) => skill.managed).every((skill) => selectedIds.has(skill.id));
+      visibleManaged.length > 0 && visibleManaged.every((skill) => selectedIds.has(skill.id));
     return (
       <section id="panel-installed" className="page-panel">
         <header className="page-header">
           <div>
-            <p className="eyebrow">SKILL LIBRARY</p>
-            <h1>已安装</h1>
-            <p>管理本机所有全局 Skill、状态和更新。</p>
+            <h1>Skill 管理</h1>
+            <p className="page-header__summary">
+              {activeSkills.length} 个 Skill
+              <span aria-hidden="true">·</span>
+              {enabledCount} 个已启用
+              <span aria-hidden="true">·</span>
+              {updateCount} 个可更新
+              {unmanagedCount ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  {unmanagedCount} 个未托管
+                </>
+              ) : null}
+            </p>
           </div>
-          <Button onClick={() => void refreshSkills()} busy={busy.has('scan')}>
-            <Icon name="refresh" />
-            刷新
-          </Button>
+          <div className="page-header__actions">
+            <Button
+              size="small"
+              onClick={() => void restartRunningApplications()}
+              busy={busy.has('restart-running-applications')}
+              disabled={!backendConnected}
+            >
+              <Icon name="refresh" size={15} />
+              重启应用
+            </Button>
+            <Button size="small" onClick={() => void refreshSkills()} busy={busy.has('scan')}>
+              <Icon name="refresh" size={15} />
+              刷新
+            </Button>
+          </div>
         </header>
-        <div className="summary-grid">
-          <div className="summary-card">
-            <span>已启用</span>
-            <strong>{skills.filter((item) => item.state === 'enabled').length}</strong>
-          </div>
-          <div className="summary-card">
-            <span>已禁用</span>
-            <strong>{skills.filter((item) => item.state === 'disabled').length}</strong>
-          </div>
-          <div className="summary-card">
-            <span>可更新</span>
-            <strong>{skills.filter((item) => item.updateStatus === 'available').length}</strong>
-          </div>
-          <div className="summary-card">
-            <span>未托管</span>
-            <strong>
-              {skills.filter((item) => item.state !== 'uninstalled' && !item.managed).length}
-            </strong>
-          </div>
-        </div>
         <div className="toolbar">
           <label className="search-field" htmlFor="installed-search">
             <Icon name="search" />
@@ -1046,163 +1124,189 @@ export function App(): JSX.Element {
             />
           </label>
           <div className="toolbar__actions">
-            <Button size="small" onClick={toggleAllVisible}>
-              {allVisibleSelected ? '取消全选' : '全选'}
-            </Button>
             <Button
               size="small"
               onClick={() => void checkUpdates()}
               busy={busy.has('check-updates')}
             >
               <Icon name="refresh" size={15} />
-              {selectedManaged.length ? `检查所选 (${selectedManaged.length})` : '检查全部'}
+              {selectedManaged.length ? `检查所选 (${selectedManaged.length})` : '检查更新'}
             </Button>
-            <Button
-              size="small"
-              variant="primary"
-              onClick={() => void updateSelected()}
-              busy={busy.has('batch-update')}
-              disabled={!selectedManaged.some((item) => item.updateStatus === 'available')}
-            >
-              <Icon name="download" size={15} />
-              更新所选
-            </Button>
+            {selectedUpdateCount ? (
+              <Button
+                size="small"
+                variant="primary"
+                onClick={() => void updateSelected()}
+                busy={busy.has('batch-update')}
+              >
+                <Icon name="download" size={15} />
+                更新 ({selectedUpdateCount})
+              </Button>
+            ) : null}
           </div>
         </div>
         {visibleSkills.length ? (
-          <div className="skill-list">
-            {visibleSkills.map((skill) => {
-              const update = UPDATE_META[skill.updateStatus];
-              const actionBusy =
-                busy.has(`skills.enable-${skill.id}`) ||
-                busy.has(`skills.disable-${skill.id}`) ||
-                busy.has(`skills.remove-${skill.id}`);
-              return (
-                <article
-                  className={`skill-card ${!skill.managed ? 'skill-card--unmanaged' : ''}`}
-                  key={skill.id}
-                >
-                  <div className="skill-card__select">
-                    {skill.managed ? (
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(skill.id)}
-                        onChange={() => toggleSelected(skill.id)}
-                        aria-label={`选择 ${skill.name}`}
-                      />
-                    ) : (
-                      <span className="unmanaged-mark">
-                        <Icon name="link" size={16} />
-                      </span>
-                    )}
-                  </div>
-                  <div className="skill-card__body">
-                    <div className="skill-card__headline">
-                      <h2>{skill.name}</h2>
-                      <span
-                        className={`pill pill--${skill.state === 'enabled' ? 'success' : skill.state === 'disabled' ? 'warning' : 'neutral'}`}
-                      >
-                        {skill.managed
-                          ? skill.state === 'enabled'
-                            ? '已启用'
-                            : '已禁用'
-                          : '未托管'}
-                      </span>
-                      {skill.managed ? (
-                        <span className={`pill pill--${update.tone}`}>{update.label}</span>
-                      ) : null}
-                    </div>
-                    <p className="skill-card__source" title={sourceLabel(skill.source)}>
-                      <Icon name="link" size={14} />
-                      {sourceLabel(skill.source)}
-                    </p>
-                    <div className="tag-row">
-                      {skill.targets.map((target) => (
-                        <span className="tag" key={target}>
-                          {targetLabel(target)}
-                        </span>
-                      ))}
-                    </div>
-                    {skill.note ? <p className="skill-card__note">备注：{skill.note}</p> : null}
-                  </div>
-                  <div className="skill-card__actions">
-                    {!skill.managed ? (
-                      <>
-                        <Button
-                          variant="primary"
-                          size="small"
-                          onClick={() => void beginAdoption(skill)}
-                          busy={busy.has(`source-${skill.id}`) || busy.has(`adopt-${skill.id}`)}
-                        >
-                          接管
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`编辑 ${skill.name} 的备注`}
-                          onClick={() => editNote(skill)}
-                        >
-                          <Icon name="edit" size={16} />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button
-                          size="small"
-                          onClick={() => void checkUpdates(skill)}
-                          busy={busy.has('check-updates')}
-                        >
-                          检查
-                        </Button>
-                        {skill.updateStatus === 'available' || skill.updateStatus === 'conflict' ? (
-                          <Button
-                            variant="primary"
-                            size="small"
-                            onClick={() => void updateOne(skill)}
-                            busy={busy.has(`update-${skill.id}`)}
+          <div className="skill-table-wrap">
+            <table className="skill-table">
+              <caption className="sr-only">已安装 Skill 管理列表</caption>
+              <colgroup>
+                <col className="skill-table__col-select" />
+                <col className="skill-table__col-name" />
+                <col className="skill-table__col-status" />
+                <col className="skill-table__col-source" />
+                <col className="skill-table__col-target" />
+                <col className="skill-table__col-note" />
+                <col className="skill-table__col-actions" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="skill-table__select" scope="col">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                      disabled={!visibleManaged.length}
+                      aria-label={allVisibleSelected ? '取消当前全部选择' : '选择当前全部 Skill'}
+                    />
+                  </th>
+                  <th scope="col">名称</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">来源</th>
+                  <th scope="col">目标</th>
+                  <th scope="col">备注</th>
+                  <th className="skill-table__actions-heading" scope="col">
+                    操作
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleSkills.map((skill) => {
+                  const update = UPDATE_META[skill.updateStatus];
+                  const showUpdateStatus =
+                    skill.updateStatus !== 'latest' && skill.updateStatus !== 'unchecked';
+                  const toggleBusy =
+                    busy.has(`skills.enable-${skill.id}`) || busy.has(`skills.disable-${skill.id}`);
+                  return (
+                    <tr
+                      className={!skill.managed ? 'skill-table__row--unmanaged' : undefined}
+                      key={skill.id}
+                    >
+                      <td className="skill-table__select">
+                        {skill.managed ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(skill.id)}
+                            onChange={() => toggleSelected(skill.id)}
+                            aria-label={`选择 ${skill.name}`}
+                          />
+                        ) : (
+                          <span className="unmanaged-mark">
+                            <Icon name="link" size={14} />
+                          </span>
+                        )}
+                      </td>
+                      <td className="skill-table__name">
+                        <strong title={skill.name}>{skill.name}</strong>
+                      </td>
+                      <td>
+                        <div className="skill-table__status-list">
+                          <span
+                            className={`pill pill--${skill.state === 'enabled' ? 'success' : skill.state === 'disabled' ? 'warning' : 'neutral'}`}
                           >
-                            更新
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="small"
-                          onClick={() => void toggleSkill(skill)}
-                          busy={actionBusy}
-                        >
-                          {skill.state === 'enabled' ? (
-                            <>
-                              <Icon name="pause" size={14} />
-                              禁用
-                            </>
-                          ) : (
-                            <>
-                              <Icon name="play" size={14} />
-                              启用
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`编辑 ${skill.name} 的备注`}
-                          onClick={() => editNote(skill)}
-                        >
-                          <Icon name="edit" size={16} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`卸载 ${skill.name}`}
-                          onClick={() => void removeSkill(skill)}
-                        >
-                          <Icon name="trash" size={16} />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+                            {skill.managed
+                              ? skill.state === 'enabled'
+                                ? '已启用'
+                                : '已禁用'
+                              : '未托管'}
+                          </span>
+                          {skill.managed && showUpdateStatus ? (
+                            <span className={`pill pill--${update.tone}`}>{update.label}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="skill-table__source" title={sourceLabel(skill.source)}>
+                          <Icon name="link" size={13} />
+                          <span>{sourceLabel(skill.source)}</span>
+                        </span>
+                      </td>
+                      <td>
+                        <div className="skill-table__targets">
+                          {skill.targets.map((target) => (
+                            <span className="tag" key={target}>
+                              {targetLabel(target)}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td
+                        className={`skill-table__note ${skill.note ? '' : 'is-empty'}`}
+                        title={skill.note || undefined}
+                      >
+                        {skill.note || '—'}
+                      </td>
+                      <td className="skill-table__actions">
+                        {!skill.managed ? (
+                          <>
+                            <Button
+                              variant="primary"
+                              size="small"
+                              onClick={() => void beginAdoption(skill)}
+                              busy={busy.has(`source-${skill.id}`) || busy.has(`adopt-${skill.id}`)}
+                            >
+                              接管
+                            </Button>
+                            <Button size="small" onClick={() => editNote(skill)}>
+                              备注
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              size="small"
+                              onClick={() => void checkUpdates(skill)}
+                              busy={busy.has('check-updates')}
+                            >
+                              检查
+                            </Button>
+                            {skill.updateStatus === 'available' ||
+                            skill.updateStatus === 'conflict' ? (
+                              <Button
+                                variant="primary"
+                                size="small"
+                                onClick={() => void updateOne(skill)}
+                                busy={busy.has(`update-${skill.id}`)}
+                              >
+                                更新
+                              </Button>
+                            ) : null}
+                            <Button
+                              size="small"
+                              onClick={() => void toggleSkill(skill)}
+                              busy={toggleBusy}
+                            >
+                              {skill.state === 'enabled' ? '禁用' : '启用'}
+                            </Button>
+                            <Button size="small" onClick={() => editNote(skill)}>
+                              备注
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="small"
+                              className="button--danger-ghost"
+                              onClick={() => void removeSkill(skill)}
+                              busy={busy.has(`skills.remove-${skill.id}`)}
+                            >
+                              卸载
+                            </Button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <EmptyState
@@ -1231,13 +1335,14 @@ export function App(): JSX.Element {
     <section id="panel-search" className="page-panel">
       <header className="page-header">
         <div>
-          <p className="eyebrow">DISCOVER</p>
-          <h1>搜索 Skill</h1>
-          <p>从公开技能库中查找并安装 Skill。</p>
+          <h1>发现 Skill</h1>
+          <p>搜索公开技能库并安装到本机。</p>
         </div>
       </header>
       <div className="remote-search">
-        <label htmlFor="remote-search">搜索公开 Skill</label>
+        <label className="sr-only" htmlFor="remote-search">
+          搜索公开 Skill
+        </label>
         <div className="remote-search__input">
           <Icon name="search" />
           <input
@@ -1250,7 +1355,6 @@ export function App(): JSX.Element {
           />
           {searching ? <span className="spinner" aria-label="正在搜索" /> : null}
         </div>
-        <p>最多显示命令返回的 6 项结果。</p>
       </div>
       <div aria-live="polite">
         {searchError ? (
@@ -1306,14 +1410,97 @@ export function App(): JSX.Element {
     </section>
   );
 
+  /** 渲染手动应用重启管理页。 */
+  const renderRestartApplicationsPage = (): JSX.Element => (
+    <section id="panel-restart-applications" className="page-panel">
+      <header className="page-header">
+        <div>
+          <h1>应用重启</h1>
+          <p>Skill 变更后，由你决定何时重新启动相关应用。</p>
+        </div>
+        <Button
+          variant="primary"
+          onClick={() => void addRestartApplication()}
+          busy={busy.has('restart-application-add')}
+        >
+          添加应用
+        </Button>
+      </header>
+      <div className="inline-alert restart-applications__notice">
+        <Icon name="info" />
+        重启会先请求应用正常退出；应用拒绝关闭或存在未保存内容时，不会强制结束进程。
+      </div>
+      {restartApplications.length ? (
+        <div className="restart-applications-table-wrap">
+          <table className="restart-applications-table">
+            <thead>
+              <tr>
+                <th>应用</th>
+                <th>程序路径</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {restartApplications.map((application) => (
+                <tr key={application.id}>
+                  <td>
+                    <strong>{application.name}</strong>
+                  </td>
+                  <td>
+                    <span
+                      className="restart-applications-table__path"
+                      title={application.executablePath}
+                    >
+                      {application.executablePath}
+                    </span>
+                  </td>
+                  <td className="restart-applications-table__actions">
+                    <Button
+                      variant="primary"
+                      size="small"
+                      onClick={() => void restartConfiguredApplication(application)}
+                      busy={busy.has(`restart-application-${application.id}`)}
+                    >
+                      <Icon name="refresh" size={15} />
+                      重启
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      className="button--danger-ghost"
+                      onClick={() => void removeRestartApplication(application)}
+                      busy={busy.has(`remove-restart-application-${application.id}`)}
+                    >
+                      移除
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          icon="refresh"
+          title="尚未添加应用"
+          body="添加需要在 Skill 变更后手动重启的 Windows EXE 程序。"
+          action={
+            <Button variant="primary" onClick={() => void addRestartApplication()}>
+              添加应用
+            </Button>
+          }
+        />
+      )}
+    </section>
+  );
+
   /** 渲染运行环境、软件更新与隐私设置页。 */
   const renderSettingsPage = (): JSX.Element => (
     <section id="panel-settings" className="page-panel">
       <header className="page-header">
         <div>
-          <p className="eyebrow">PREFERENCES</p>
           <h1>设置</h1>
-          <p>检查运行环境、软件版本和本地数据策略。</p>
+          <p>运行环境、软件更新与本地数据。</p>
         </div>
       </header>
       <div className="settings-grid">
@@ -1447,7 +1634,9 @@ export function App(): JSX.Element {
           ? renderInstalledPage()
           : displayedPage === 'search'
             ? renderSearchPage()
-            : renderSettingsPage()}
+            : displayedPage === 'restartApplications'
+              ? renderRestartApplicationsPage()
+              : renderSettingsPage()}
       </main>
 
       {progress ? (

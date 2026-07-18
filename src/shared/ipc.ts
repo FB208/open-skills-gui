@@ -4,6 +4,9 @@ import type {
   BackendMethod,
   BackendRequest,
   RemoteSkillResult,
+  RestartApplication,
+  RestartApplicationResult,
+  RestartApplicationsBatchResult,
   RuntimeStatus,
   SkillRecord,
   SkillSource,
@@ -30,6 +33,11 @@ export interface BackendPayloadMap {
   'skills.update': { ids: string[]; overwriteConflicts?: string[] };
   'app.checkUpdate': { manual: boolean };
   'app.installUpdate': { update: AppUpdateInfo };
+  'restartApplications.list': undefined;
+  'restartApplications.add': { executablePath: string };
+  'restartApplications.remove': { id: string };
+  'restartApplications.restart': { id: string };
+  'restartApplications.restartRunning': undefined;
 }
 
 export interface BackendResultMap {
@@ -48,6 +56,11 @@ export interface BackendResultMap {
   'skills.update': SkillRecord[];
   'app.checkUpdate': AppUpdateInfo;
   'app.installUpdate': { started: boolean };
+  'restartApplications.list': RestartApplication[];
+  'restartApplications.add': RestartApplication;
+  'restartApplications.remove': { removed: boolean };
+  'restartApplications.restart': RestartApplicationResult;
+  'restartApplications.restartRunning': RestartApplicationsBatchResult;
 }
 
 export type TypedBackendRequest<M extends BackendMethod> = Omit<

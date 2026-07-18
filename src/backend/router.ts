@@ -3,6 +3,7 @@ import { BackendException, toBackendError } from './errors.js';
 import type { LocalLogger } from './logger.js';
 import type { AsyncMutex } from './mutex.js';
 import type { RuntimeService } from './runtime.js';
+import type { RestartApplicationsService } from './restart-applications.js';
 import type { SkillsService } from './skills-service.js';
 import type {
   AgentTarget,
@@ -25,6 +26,7 @@ export class BackendRouter {
     private readonly writes: AsyncMutex,
     private readonly logger: LocalLogger,
     private readonly emitProgress: ProgressEmitter = () => undefined,
+    private readonly restartApplications?: RestartApplicationsService,
   ) {}
 
   /** 处理单个未知输入，并始终返回统一响应结构。 */
@@ -139,6 +141,26 @@ export class BackendRouter {
         );
         return result;
       }
+      case 'restartApplications.list':
+        assertNoPayload(request.payload);
+        return await this.requireRestartApplications().list();
+      case 'restartApplications.add': {
+        const payload = objectPayload(request.payload, ['executablePath']);
+        return await this.requireRestartApplications().add(
+          requiredString(payload.executablePath, 'executablePath', 32_767),
+        );
+      }
+      case 'restartApplications.remove': {
+        const payload = objectPayload(request.payload, ['id']);
+        return await this.requireRestartApplications().remove(applicationId(payload.id));
+      }
+      case 'restartApplications.restart': {
+        const payload = objectPayload(request.payload, ['id']);
+        return await this.requireRestartApplications().restart(applicationId(payload.id));
+      }
+      case 'restartApplications.restartRunning':
+        assertNoPayload(request.payload);
+        return await this.requireRestartApplications().restartRunning();
       case 'app.checkUpdate': {
         const payload = objectPayload(request.payload, ['manual']);
         requiredBoolean(payload.manual, 'manual');
@@ -160,6 +182,13 @@ export class BackendRouter {
       default:
         throw new BackendException('METHOD_NOT_FOUND', '不支持的后端方法');
     }
+  }
+
+  /** 取得已配置的应用重启服务。 */
+  private requireRestartApplications(): RestartApplicationsService {
+    if (!this.restartApplications)
+      throw new BackendException('SERVICE_UNAVAILABLE', '应用重启服务不可用');
+    return this.restartApplications;
   }
 
   /** 推送与请求编号关联的操作进度。 */
@@ -361,6 +390,13 @@ function recordMap<T>(input: unknown, parser: (item: unknown) => T): Record<stri
 }
 
 /** 读取并校验单个 Skill 编号。 */
+function applicationId(input: unknown): string {
+  const value = requiredString(input, 'id', 36);
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value))
+    throw new BackendException('INVALID_INPUT', '应用编号无效');
+  return value;
+}
+
 function recordId(input: unknown, field: string): string {
   const value = requiredString(input, field, 36);
   if (!isRecordId(value))
@@ -392,6 +428,11 @@ const METHODS = new Set<BackendMethod>([
   'skills.update',
   'app.checkUpdate',
   'app.installUpdate',
+  'restartApplications.list',
+  'restartApplications.add',
+  'restartApplications.remove',
+  'restartApplications.restart',
+  'restartApplications.restartRunning',
 ]);
 const TARGETS = new Set<AgentTarget>(['universal', 'claude-code', 'windsurf']);
 const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
