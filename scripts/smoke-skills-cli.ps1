@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $SkillsVersion = '1.5.19'
-$Source = 'vercel-labs/agent-skills'
+$Source = 'https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices'
 $SkillName = 'vercel-react-best-practices'
 if ([string]::IsNullOrWhiteSpace($BaseRoot)) {
     $BaseRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { $env:RUNNER_TEMP } else { $env:TEMP }
