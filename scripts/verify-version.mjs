@@ -76,6 +76,7 @@ async function verifyVersions() {
       'extensions.dispatch',
       'extensions.getStats',
       'os.execCommand',
+      'os.showOpenDialog',
     ]),
   );
   assertEqual(
