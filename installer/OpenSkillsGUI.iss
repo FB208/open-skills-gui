@@ -46,7 +46,7 @@ VersionInfoProductVersion={#AppVersion}
 VersionInfoDescription=Windows Skill 管理客户端
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "{#SourceRoot}\installer\languages\ChineseSimplified.isl"
 
 [Files]
 Source: "{#DistributionDir}\OpenSkillsGUI-win_x64.exe"; DestDir: "{app}"; DestName: "OpenSkillsGUI.exe"; Flags: ignoreversion
