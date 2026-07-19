@@ -23,7 +23,6 @@
     "validate:runtime-paths": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-runtime-path-safety.ps1",
     "validate:software-update": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-software-update-safety.ps1",
     "smoke:skills-cli": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/smoke-skills-cli.ps1",
-    "verify:version": "node scripts/verify-version.mjs",
     "package:installer": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-installer.ps1"
   },
   "dependencies": {

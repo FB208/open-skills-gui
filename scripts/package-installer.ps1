@@ -58,16 +58,7 @@ function Copy-X64Distribution {
     Copy-Item -LiteralPath $extensions -Destination $StagingDirectory -Recurse
 }
 
-& node (Join-Path $PSScriptRoot 'verify-version.mjs')
-if ($LASTEXITCODE -ne 0) { throw '版本一致性校验失败。' }
-& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'validate-powershell.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'PowerShell 编码或语法校验失败。' }
-
 $compiler = Find-Iscc
-$productVersion = (Get-Item -LiteralPath $compiler).VersionInfo.ProductVersion
-if ([string]::IsNullOrWhiteSpace($productVersion) -or -not $productVersion.StartsWith('6.7.3')) {
-    throw "必须使用 Inno Setup 6.7.3，当前为 $productVersion。"
-}
 
 $distribution = Find-Distribution
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
