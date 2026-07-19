@@ -21,13 +21,10 @@ npx neu run
 
 ## 构建并启动完整应用
 
-
 ```powershell
 npm run build
 
 ```
-
-
 
 安装程序生成在 `installer\output\OpenSkillsGUI-Setup-x64.exe`。
 

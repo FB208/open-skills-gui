@@ -26,5 +26,3 @@ export function startSilentUpdateCheck(
     })
     .catch(() => undefined);
 }
-
-
